@@ -68,12 +68,43 @@ function schedulePdf(){
   if(revision===pdfRevision){q('#sl-download').textContent='Скачать PDF';measure();}
  },250);
 }
+// Mobile save: share a named PDF file directly from the click gesture.
+let pdfSharePending=false;
 function downloadPdf(){
- if(!pdfBase64)return;
+ if(!pdfBase64||!pdfUrl||pdfSharePending)return;
  const digits=q('#sl-text').value.match(/\d+(?:[.,]\d+)?/g)||['0'];
  const filename=(brand===0?'mia ':'')+digits.join('.')+'.pdf';
- const link=document.createElement('a');link.href=pdfUrl;link.download=filename;link.style.display='none';
- document.body.append(link);link.click();setTimeout(()=>link.remove(),1000);
+ const mobile=/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)||
+   (navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+ const bytes=Uint8Array.from(atob(pdfBase64),c=>c.charCodeAt(0));
+ const file=new File([bytes],filename,{type:'application/pdf'});
+ const revision=pdfRevision;
+ const report=message=>{if(revision===pdfRevision)q('#sl-status').textContent=message;};
+ let canShare=false;
+ try{canShare=mobile&&typeof navigator.share==='function'&&
+   typeof navigator.canShare==='function'&&navigator.canShare({files:[file]});}catch(e){}
+ if(canShare){
+  pdfSharePending=true;
+  report('В системном меню выберите сохранение файла. На iPhone — «Сохранить в Файлы».');
+  const failed=error=>{
+   if(error&&error.name==='AbortError'){report('Сохранение отменено. Нажмите кнопку, чтобы повторить.');return;}
+   report('Системное сохранение недоступно. Откройте страницу в Safari или Chrome и повторите.');
+  };
+  try{
+   // No await before share: preserve the browser's user activation.
+   Promise.resolve(navigator.share({files:[file]})).then(()=>{
+    report('Файл передан системному меню. Сохранение выполняется выбранным приложением.');
+   },failed).finally(()=>{pdfSharePending=false;});
+  }catch(error){pdfSharePending=false;failed(error);}
+  return;
+ }
+ // Explicit same-tab download, independent of any <base target> on Tilda.
+ const downloadUrl=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));
+ const link=document.createElement('a');
+ link.href=downloadUrl;link.download=filename;link.target='_self';link.style.display='none';
+ document.body.append(link);
+ try{link.click();report(mobile?'Если браузер показал PDF, выберите в его меню сохранение файла.':'Запрос на скачивание отправлен браузеру.');}
+ finally{setTimeout(()=>{link.remove();URL.revokeObjectURL(downloadUrl);},60000);}
 }
 
 function measure(){const logo=q('#sl-logo'),zone=q('#sl-zone');const bottom=254.40196480984642;const iconTop=selected.size?399-Math.max(...[...selected].map(i=>(assets.icons[i].h-(assets.icons[i].baselineOffset||0))*iconScale)):370;zone.style.top=bottom+'px';zone.style.height=Math.max(0,iconTop-bottom)+'px';const errors=[];if(q('#sl-label-text').getBoundingClientRect().height>iconTop-bottom-14)errors.push('Слишком много текста: сократи строки, чтобы сохранить отступы.');if(q('#sl-care').getBoundingClientRect().height>90)errors.push('Слишком много значков для отведённой области.');q('#sl-status').textContent=errors.join(' ')||pdfError;q('#sl-download').disabled=errors.length>0||!pdfUrl;}
